@@ -3,6 +3,18 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { getDb } from "../../../lib/db";
 import { requireRole } from "../../../lib/auth";
+import defaultTemplate from "../../../lib/invitation-default";
+
+async function getSettings() {
+  const db = getDb();
+  let row = await db.prepare("SELECT * FROM app.invitation_settings WHERE id = 1").get();
+  if (!row) {
+    row = await db.prepare(
+      "INSERT INTO app.invitation_settings (id, message_template) VALUES (1, ?) RETURNING *"
+    ).get(defaultTemplate);
+  }
+  return row;
+}
 
 function publicSettings(row) {
   return {
@@ -15,7 +27,7 @@ function publicSettings(row) {
 
 export async function GET(req) {
   if (!requireRole(req, ["admin"])) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const row = await getDb().prepare("SELECT * FROM app.invitation_settings WHERE id = 1").get();
+  const row = await getSettings();
   return NextResponse.json(publicSettings(row));
 }
 
@@ -25,6 +37,7 @@ export async function PUT(req) {
   const message = String(body.message_template || "").trim();
   if (!message) return NextResponse.json({ error: "Message template cannot be empty." }, { status: 400 });
   const now = new Date().toISOString();
+  await getSettings();
   await getDb().prepare(
     `UPDATE app.invitation_settings SET message_template = ?, poster_enabled = ?, updated_at = ? WHERE id = 1`
   ).run(message, body.poster_enabled === false ? 0 : 1, now);
