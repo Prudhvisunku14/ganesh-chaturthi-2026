@@ -3,7 +3,7 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { getDb } from "../../../lib/db";
 import { requireRole } from "../../../lib/auth";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID as uuidv4 } from "node:crypto";
 
 export async function GET(req) {
   const session = requireRole(req, ["admin", "volunteer"]);
@@ -24,7 +24,7 @@ export async function GET(req) {
   const args = {};
 
   if (search) {
-    where.push("(name LIKE @search OR phone LIKE @search OR email LIKE @search OR registration_id LIKE @search)");
+    where.push("(name ILIKE @search OR phone ILIKE @search OR email ILIKE @search OR registration_id ILIKE @search)");
     args.search = `%${search}%`;
   }
   if (payment) {
@@ -53,12 +53,12 @@ export async function GET(req) {
   const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
   const db = getDb();
-  const rows = db
+  const rows = await db
     .prepare(
       `SELECT id, registration_id, name, phone, email, year, program, department, payment_proof_url,
-              payment_status, qr_token, whatsapp_sent, whatsapp_sent_at,
+              payment_status, qr_token, whatsapp_sent, whatsapp_sent_at, whatsapp_status, whatsapp_error,
               email_sent, email_sent_at, food_claimed, claimed_at, created_at
-       FROM participants
+       FROM app.participants
        ${whereClause}
        ORDER BY created_at DESC`
     )
@@ -82,9 +82,9 @@ export async function POST(req) {
   const registrationId = `REG-${uuidv4().slice(0, 8).toUpperCase()}`;
 
   try {
-    const info = db
+    const info = await db
       .prepare(
-        `INSERT INTO participants (registration_id, name, phone, email, year, program, department, payment_status)
+        `INSERT INTO app.participants (registration_id, name, phone, email, year, program, department, payment_status)
          VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`
       )
       .run(registrationId, name.trim(), phone.trim(), email ? email.trim() : null, year || null, program || null, department || null);
@@ -101,6 +101,6 @@ export async function DELETE(req) {
   // Optional: only delete a specific subset if `filter` body is sent,
   // otherwise wipe all participants.
   const db = getDb();
-  const info = db.prepare("DELETE FROM participants").run();
+  const info = await db.prepare("DELETE FROM app.participants").run();
   return NextResponse.json({ ok: true, deleted: info.changes });
 }

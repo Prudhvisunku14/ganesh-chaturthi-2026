@@ -64,9 +64,8 @@ export default function ScannerPage() {
       setResult({ result: "error", message: "Network connection error." });
     }
 
-    setTimeout(() => {
-      busyRef.current = false;
-    }, 1500);
+    // Keep the accepted result visible until the volunteer advances. Otherwise
+    // the camera can rescan the same pass and overwrite green with already-used.
   }, []);
 
   useEffect(() => {
@@ -115,6 +114,7 @@ export default function ScannerPage() {
 
   function dismissResult() {
     setResult(null);
+    busyRef.current = false;
   }
 
   const style = result ? RESULT_STYLES[result.result] || RESULT_STYLES.error : null;

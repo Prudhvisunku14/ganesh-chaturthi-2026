@@ -10,6 +10,8 @@ const STAT_CARDS = [
   { key: "payment_rejected", label: "Rejected",          icon: "❌", bg: "#fef2f2" },
   { key: "qr_generated",    label: "QR Generated",      icon: "📱", bg: "#eeefff" },
   { key: "whatsapp_sent",   label: "WhatsApp Sent",     icon: "💬", bg: "#ecfdf5" },
+  { key: "whatsapp_pending", label: "Invites Pending",   icon: "⏳", bg: "#fffbeb" },
+  { key: "whatsapp_failed",  label: "Invites Failed",    icon: "⚠️", bg: "#fef2f2" },
   { key: "food_collected",  label: "Food Claimed",      icon: "🍱", bg: "#ecfdf5" },
   { key: "food_remaining",  label: "Food Remaining",    icon: "🍽️", bg: "#fef2f2" },
 ];
@@ -79,6 +81,8 @@ export default function DashboardHome() {
         </Link>
       </div>
 
+      <InvitationSettingsCard />
+
       {/* ── Live Analytics Cards ── */}
       <h2 style={{ fontSize: 16, fontWeight: 800, marginBottom: 12, color: "var(--text)" }}>
         Live Analytics
@@ -147,5 +151,92 @@ export default function DashboardHome() {
         )}
       </div>
     </main>
+  );
+}
+
+function InvitationSettingsCard() {
+  const [settings, setSettings] = useState(null);
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  const load = useCallback(async () => {
+    const res = await fetch("/api/invitation-settings");
+    if (res.ok) {
+      const data = await res.json();
+      setSettings(data);
+      setMessage(data.message_template || "");
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function saveTemplate() {
+    setSaving(true);
+    const res = await fetch("/api/invitation-settings", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_template: message, poster_enabled: settings.poster_enabled }),
+    });
+    setNotice(res.ok ? "Template saved." : (await res.json()).error || "Could not save template.");
+    setSaving(false);
+    setTimeout(() => setNotice(""), 3000);
+  }
+
+  async function togglePoster(event) {
+    const enabled = event.target.checked;
+    setSettings((current) => ({ ...current, poster_enabled: enabled }));
+    await fetch("/api/invitation-settings", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_template: message, poster_enabled: enabled }),
+    });
+  }
+
+  async function uploadPoster(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const form = new FormData();
+    form.append("poster", file);
+    const res = await fetch("/api/invitation-settings", { method: "POST", body: form });
+    if (res.ok) { setNotice("Poster saved."); load(); }
+    else setNotice((await res.json()).error || "Could not save poster.");
+    event.target.value = "";
+  }
+
+  async function removePoster() {
+    const res = await fetch("/api/invitation-settings", { method: "DELETE" });
+    if (res.ok) { setNotice("Poster removed."); load(); }
+  }
+
+  if (!settings) return null;
+  return (
+    <section className="card" style={{ padding: 18, marginBottom: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 14 }}>
+        <div>
+          <h2 style={{ fontSize: 16, fontWeight: 800 }}>WhatsApp Invitations</h2>
+          <p style={{ color: "var(--text-muted)", fontSize: 12.5, marginTop: 4 }}>The active template and poster are used by WhatsApp and Gmail.</p>
+        </div>
+        {notice && <span className="badge badge-success">{notice}</span>}
+      </div>
+      <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "var(--text-muted)", marginBottom: 5 }}>MESSAGE TEMPLATE</label>
+      <textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={12} />
+      <div style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 6 }}>Variables: {"{NAME}"}, {"{PROGRAM}"}, {"{YEAR}"}, {"{DATE}"}, {"{VENUE}"}</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 14 }}>
+        <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={saveTemplate}>{saving ? "Saving..." : "Save Template"}</button>
+        <label className="btn btn-sm" style={{ cursor: "pointer" }}>
+          Change Poster
+          <input type="file" accept="image/*" onChange={uploadPoster} style={{ display: "none" }} />
+        </label>
+        {settings.poster_url && <button type="button" className="btn btn-sm" onClick={removePoster}>Remove Poster</button>}
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, marginLeft: "auto" }}>
+          <input type="checkbox" checked={settings.poster_enabled} onChange={togglePoster} style={{ width: 16, minHeight: 16 }} /> Enable poster
+        </label>
+      </div>
+      {settings.poster_url && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", marginBottom: 6 }}>CURRENT POSTER</div>
+          <img src={`${settings.poster_url}?v=${settings.updated_at}`} alt="Current invitation poster" style={{ maxWidth: "100%", maxHeight: 260, objectFit: "contain", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }} />
+        </div>
+      )}
+    </section>
   );
 }

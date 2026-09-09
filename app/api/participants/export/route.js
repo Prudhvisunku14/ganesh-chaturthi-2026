@@ -9,7 +9,7 @@ export async function GET(req) {
   if (!session) return new Response("Unauthorized", { status: 401 });
 
   const db = getDb();
-  const rows = db
+  const rows = await db
     .prepare(
       `SELECT
          name,
@@ -21,7 +21,7 @@ export async function GET(req) {
          CASE WHEN whatsapp_sent = 1 THEN 'sent' ELSE 'not_sent' END AS whatsapp_status,
          CASE WHEN email_sent    = 1 THEN 'sent' ELSE 'not_sent' END AS email_status,
          CASE WHEN food_claimed  = 1 THEN 'collected' ELSE 'not_collected' END AS food_status
-       FROM participants
+       FROM app.participants
        ORDER BY created_at DESC`
     )
     .all();

@@ -1,6 +1,7 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
+import { CLAIM_SQL } from "../../../../lib/claim";
 import { getDb } from "../../../../lib/db";
 import { requireRole } from "../../../../lib/auth";
 
@@ -47,7 +48,13 @@ export async function POST(req) {
   const token = rawToken.includes("/verify/") ? rawToken.split("/verify/").pop().trim() : rawToken.trim();
 
   const db = getDb();
-  const participant = db.prepare("SELECT * FROM participants WHERE qr_token = ?").get(token);
+  // PostgreSQL locks and rechecks the predicate when concurrent scans race.
+  // A successful scan needs only this one round trip.
+  const claimed = await db.prepare(CLAIM_SQL).get(session.uid, token);
+  if (claimed) {
+    return NextResponse.json({ result: "valid", message: "Food verified.", participant: publicView(claimed) });
+  }
+  const participant = await db.prepare("SELECT * FROM app.participants WHERE qr_token = ?").get(token);
 
   if (!participant) {
     return NextResponse.json({ result: "invalid_unrecognized", message: "QR code not recognized." });
@@ -77,38 +84,14 @@ export async function POST(req) {
     });
   }
 
-  // --- Atomic claim -----------------------------------------------------
-  // This single UPDATE...WHERE is the concurrency guard: if two scans race,
-  // only the first UPDATE actually changes a row (food_claimed 0 -> 1);
-  // the second UPDATE affects zero rows and falls through to "already_used".
-  // better-sqlite3 executes this synchronously and SQLite serializes writes,
-  // so this is safe without an explicit transaction. The Postgres/Supabase
-  // equivalent (see lib/db.js) relies on the same WHERE-guarded UPDATE.
-  // RETURNING folds the post-write SELECT into the same statement, saving a
-  // round trip on every scan — the path that matters most under concurrency.
-  const claimed = db.prepare(
-    `UPDATE participants
-     SET food_claimed = 1, claimed_at = datetime('now'), claimed_by_user_id = ?, updated_at = datetime('now')
-     WHERE qr_token = ? AND food_claimed = 0
-     RETURNING *`
-  ).get(session.uid, token);
-
-  if (!claimed) {
-    // Someone else's request won the race between our SELECT and UPDATE.
-    const fresh = db.prepare("SELECT * FROM participants WHERE qr_token = ?").get(token);
-    return NextResponse.json({
-      result: "already_used",
-      message: "Food has already been collected.",
-      participant: publicView(fresh),
-    });
-  }
-
-  return NextResponse.json({ result: "valid", message: "Food verified.", participant: publicView(claimed) });
+  return NextResponse.json({ result: "not_eligible", message: "Registration changed. Scan again.", participant: publicView(participant) });
 }
 
 function publicView(p) {
   return {
     name: p.name,
+    registration_id: p.registration_id,
+    phone: p.phone,
     program: p.program,
     year: p.year,
     department: p.department,

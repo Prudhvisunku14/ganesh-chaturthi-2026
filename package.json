@@ -6,20 +6,31 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "seed": "node scripts/seed.js"
+    "seed": "node scripts/seed.js",
+    "db:setup": "node scripts/setup-db.js",
+    "db:migrate-sqlite": "node scripts/migrate-sqlite.js",
+    "test": "node --test tests/*.test.cjs"
   },
   "dependencies": {
     "bcryptjs": "2.4.3",
-    "better-sqlite3": "^13.0.3",
     "dotenv": "16.4.5",
     "html5-qrcode": "2.3.8",
     "jsonwebtoken": "9.0.2",
-    "next": "14.2.35",
-    "nodemailer": "^9.0.6",
+    "next": "15.5.25",
+    "nodemailer": "10.0.1",
     "papaparse": "5.4.1",
+    "postgres": "^3.4.9",
     "qrcode": "1.5.4",
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "uuid": "9.0.1"
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8"
+  },
+  "engines": {
+    "node": "22.x"
+  },
+  "overrides": {
+    "postcss": "8.5.23"
   }
 }

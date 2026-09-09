@@ -3,8 +3,8 @@ import { redirect } from "next/navigation";
 import { readSessionToken, COOKIE_NAME } from "../../lib/auth";
 import SidebarNav from "./SidebarNav";
 
-export default function DashboardLayout({ children }) {
-  const raw     = cookies().get(COOKIE_NAME)?.value;
+export default async function DashboardLayout({ children }) {
+  const raw     = (await cookies()).get(COOKIE_NAME)?.value;
   const session = raw ? readSessionToken(raw) : null;
 
   if (!session) redirect("/login");

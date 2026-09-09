@@ -9,12 +9,13 @@ export async function GET(req) {
   return NextResponse.json({ error: "Method Not Allowed. Use POST to send email." }, { status: 405 });
 }
 
-export async function POST(req, { params }) {
+export async function POST(req, props) {
+  const params = await props.params;
   const session = requireRole(req, ["admin"]);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const db = getDb();
-  const participant = db.prepare("SELECT * FROM participants WHERE id = ?").get(params.id);
+  const participant = await db.prepare("SELECT * FROM app.participants WHERE id = ?").get(params.id);
 
   if (!participant) {
     return NextResponse.json({ error: "Participant not found." }, { status: 404 });
@@ -32,12 +33,15 @@ export async function POST(req, { params }) {
     return NextResponse.json({ error: "No QR code token generated for this participant." }, { status: 400 });
   }
 
+  const settings = await db.prepare("SELECT * FROM app.invitation_settings WHERE id = 1").get();
+  const posterPath = settings.poster_enabled && settings.poster_path ? settings.poster_path : null;
+
   try {
-    await sendQrEmail(participant);
+    await sendQrEmail(participant, settings.message_template, posterPath);
 
     const now = new Date().toISOString();
-    db.prepare(
-      `UPDATE participants
+    await db.prepare(
+      `UPDATE app.participants
        SET email_sent = 1, email_sent_at = ?, updated_at = ?
        WHERE id = ?`
     ).run(now, now, params.id);

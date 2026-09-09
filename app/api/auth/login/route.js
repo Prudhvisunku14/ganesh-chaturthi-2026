@@ -12,7 +12,7 @@ export async function POST(req) {
   }
 
   const db = getDb();
-  const user = db.prepare("SELECT * FROM users WHERE username = ?").get(username);
+  const user = await db.prepare("SELECT * FROM app.users WHERE username = ?").get(username);
 
   if (!user || !verifyPassword(password, user.password_hash)) {
     return NextResponse.json({ error: "Invalid username or password." }, { status: 401 });

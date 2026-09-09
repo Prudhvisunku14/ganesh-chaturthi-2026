@@ -1,0 +1,7 @@
+.env*
+data/
+poster/
+tests/
+supabase/
+scripts/
+*.log

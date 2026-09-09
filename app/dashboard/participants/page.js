@@ -20,6 +20,8 @@ export default function ParticipantsPage() {
   const [addOpen,      setAddOpen]      = useState(false);
   const [importOpen,   setImportOpen]   = useState(false);
   const [toast,        setToast]        = useState("");
+  const [selectedIds,  setSelectedIds]  = useState([]);
+  const [bulkSending,  setBulkSending]  = useState(false);
   const fileInputRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -127,6 +129,7 @@ export default function ParticipantsPage() {
         id: p.id, name: p.name, phone: p.phone, email: p.email,
         whatsapp_sent: !!p.whatsapp_sent, email_sent: !!p.email_sent,
         qr_image: data.qr_image, qr_token: data.qr_token,
+        message: data.message, poster_url: data.poster_url, mode: data.mode,
       });
     } else {
       showToast(data.error || "Could not load QR.");
@@ -137,12 +140,39 @@ export default function ParticipantsPage() {
     const res  = await fetch(`/api/participants/${participantId}/whatsapp`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) { showToast(data.error || "Could not build WhatsApp link."); return; }
-    window.open(data.link, "_blank", "noopener,noreferrer");
-    await fetch(`/api/participants/${participantId}/whatsapp`, { method: "POST" });
-    showToast(`WhatsApp opened for ${participantName}.`);
-    setQrModal((prev) => (prev ? { ...prev, whatsapp_sent: true } : prev));
+    if (data.mode === "cloud") {
+      const sendRes = await fetch(`/api/participants/${participantId}/whatsapp`, { method: "POST" });
+      const sendData = await sendRes.json().catch(() => ({}));
+      showToast(sendRes.ok ? `Invitation sent to ${participantName}.` : (sendData.error || "WhatsApp send failed."));
+      if (sendRes.ok) setQrModal((prev) => (prev ? { ...prev, whatsapp_status: "sent" } : prev));
+    } else {
+      window.open(data.link, "_blank", "noopener,noreferrer");
+      showToast(`WhatsApp opened for ${participantName}. Poster and QR must be attached manually. Status remains NOT SENT.`);
+    }
     load();
   }
+
+  async function handleBulkSend() {
+    if (!selectedIds.length) return;
+    setBulkSending(true);
+    let sent = 0;
+    let mode = "fallback";
+    for (const id of selectedIds) {
+      const preview = await fetch(`/api/participants/${id}/whatsapp`).then((res) => res.json());
+      mode = preview.mode || mode;
+      if (!preview.mode || preview.mode === "fallback") {
+        if (preview.link) window.open(preview.link, "_blank", "noopener,noreferrer");
+      } else {
+        const response = await fetch(`/api/participants/${id}/whatsapp`, { method: "POST" });
+        if (response.ok) sent += 1;
+      }
+    }
+    setBulkSending(false);
+    setSelectedIds([]);
+    showToast(mode === "cloud" ? `Sent ${sent} invitation(s).` : "Opened selected WhatsApp links. Status remains NOT SENT until Cloud API is configured.");
+    load();
+  }
+
 
   async function handleSendEmail(p) {
     if (!p.email) { showToast("No email address registered."); return; }
@@ -207,6 +237,10 @@ export default function ParticipantsPage() {
           </div>
         </div>
 
+        <button type="button" className="btn btn-sm btn-primary" disabled={!selectedIds.length || bulkSending} onClick={handleBulkSend} style={{ marginTop: 10 }}>
+          {bulkSending ? "Sending..." : `📱 Send to Selected (${selectedIds.length})`}
+        </button>
+
         {/* Secondary Toolbar Buttons */}
         <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
           <button type="button" className="btn btn-sm" onClick={() => setImportOpen(true)} style={{ padding: "4px 8px", fontSize: 11.5 }}>
@@ -258,6 +292,8 @@ export default function ParticipantsPage() {
               key={p.id}
               p={p}
               emailSending={!!emailSending[p.id]}
+              selected={selectedIds.includes(p.id)}
+              onSelect={(checked) => setSelectedIds((ids) => checked ? [...new Set([...ids, p.id])] : ids.filter((id) => id !== p.id))}
               onVerify={handleVerify}
               onOpenQr={handleOpenQrWhatsApp}
               onSendEmail={handleSendEmail}
@@ -317,7 +353,7 @@ export default function ParticipantsPage() {
 }
 
 /* ── Individual Mobile Participant Card ── */
-function ParticipantCard({ p, emailSending, onVerify, onOpenQr, onSendEmail, onDelete }) {
+function ParticipantCard({ p, emailSending, selected, onSelect, onVerify, onOpenQr, onSendEmail, onDelete }) {
   const pay        = PAYMENT_BADGE[p.payment_status] || PAYMENT_BADGE.pending;
   const isVerified = p.payment_status === "verified";
   const hasQr      = isVerified && p.qr_token;
@@ -329,6 +365,7 @@ function ParticipantCard({ p, emailSending, onVerify, onOpenQr, onSendEmail, onD
     <div className="p-card">
       <div className="p-card-top">
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
+          {isVerified && <input type="checkbox" checked={selected} onChange={(event) => onSelect(event.target.checked)} aria-label={`Select ${p.name}`} style={{ width: 17, minHeight: 17 }} />}
           <div className="p-card-avatar">{initials}</div>
           <div className="p-card-info">
             <div className="p-card-name">{p.name}</div>
@@ -341,6 +378,10 @@ function ParticipantCard({ p, emailSending, onVerify, onOpenQr, onSendEmail, onD
           <span className="dot" />{pay.label}
         </span>
       </div>
+
+      {isVerified && <div style={{ marginTop: 7, fontSize: 11.5, color: p.whatsapp_status === "sent" ? "var(--success-dark)" : p.whatsapp_status === "failed" ? "var(--error-dark)" : "var(--text-muted)" }}>
+        WhatsApp: {(p.whatsapp_status || (p.whatsapp_sent ? "sent" : "not_sent")).replace("_", " ").toUpperCase()}
+      </div>}
 
       {(p.year || p.program || p.payment_proof_url) && (
         <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -368,7 +409,7 @@ function ParticipantCard({ p, emailSending, onVerify, onOpenQr, onSendEmail, onD
         {hasQr && (
           <>
             <button type="button" className="btn btn-sm btn-primary" onClick={() => onOpenQr(p)}>
-              📱 {p.whatsapp_sent ? "Resend WA" : "Send WA"}
+              📱 Send Invitation
             </button>
             {hasEmail && (
               <button type="button" className="btn btn-sm" disabled={emailSending} onClick={() => onSendEmail(p)}>
@@ -421,6 +462,8 @@ function QrWhatsAppModal({ data, onClose, onSendWhatsApp, onSendEmail, emailSend
   return (
     <Modal title={`Pass — ${data.name}`} onClose={onClose}>
       <div style={{ textAlign: "center", marginBottom: 16 }}>
+        {data.poster_url && <img src={data.poster_url} alt="Invitation poster" style={{ maxWidth: "100%", maxHeight: 180, objectFit: "contain", marginBottom: 12, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }} />}
+        {data.message && <pre style={{ whiteSpace: "pre-wrap", textAlign: "left", background: "var(--surface-muted)", borderRadius: "var(--radius-sm)", padding: 12, fontFamily: "inherit", fontSize: 12.5, lineHeight: 1.5, marginBottom: 12 }}>{data.message}</pre>}
         <img
           src={data.qr_image}
           alt={`QR for ${data.name}`}
@@ -446,7 +489,7 @@ function QrWhatsAppModal({ data, onClose, onSendWhatsApp, onSendEmail, emailSend
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <button type="button" className="btn btn-success btn-block" onClick={doSendWhatsApp} disabled={sendingWa}>
-          {sendingWa ? "Opening..." : data.whatsapp_sent ? "📱 Resend via WhatsApp" : "📱 Open WhatsApp"}
+          {sendingWa ? "Sending..." : data.mode === "cloud" ? "📱 Send Invitation" : "📱 Open WhatsApp (manual attachments)"}
         </button>
         <button type="button" className="btn btn-primary btn-block" disabled={!data.email || emailSending} onClick={() => onSendEmail(data)}>
           {emailSending ? "Sending..." : !data.email ? "✉️ No email registered" : "✉️ Send QR Email"}

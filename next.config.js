@@ -1,9 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  experimental: {
-    serverComponentsExternalPackages: ["better-sqlite3"],
-  },
+  serverExternalPackages: ["postgres"],
   async redirects() {
     return [
       {
@@ -16,4 +14,3 @@ const nextConfig = {
 };
 
 module.exports = nextConfig;
-

@@ -9,7 +9,7 @@ export async function GET(req) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const db = getDb();
-  const row = db
+  const row = await db
     .prepare(
       `SELECT
         COUNT(*) AS total_registered,
@@ -18,8 +18,10 @@ export async function GET(req) {
         SUM(CASE WHEN payment_status = 'rejected' THEN 1 ELSE 0 END) AS payment_rejected,
         SUM(CASE WHEN qr_token IS NOT NULL THEN 1 ELSE 0 END) AS qr_generated,
         SUM(CASE WHEN whatsapp_sent = 1 THEN 1 ELSE 0 END) AS whatsapp_sent,
+        SUM(CASE WHEN whatsapp_status = 'not_sent' THEN 1 ELSE 0 END) AS whatsapp_pending,
+        SUM(CASE WHEN whatsapp_status = 'failed' THEN 1 ELSE 0 END) AS whatsapp_failed,
         SUM(CASE WHEN food_claimed = 1 THEN 1 ELSE 0 END) AS food_collected
-      FROM participants`
+      FROM app.participants`
     )
     .get();
 
@@ -32,6 +34,8 @@ export async function GET(req) {
     payment_rejected: row.payment_rejected || 0,
     qr_generated: row.qr_generated || 0,
     whatsapp_sent: row.whatsapp_sent || 0,
+    whatsapp_pending: row.whatsapp_pending || 0,
+    whatsapp_failed: row.whatsapp_failed || 0,
     food_collected: row.food_collected || 0,
     food_remaining: foodRemaining > 0 ? foodRemaining : 0,
   });

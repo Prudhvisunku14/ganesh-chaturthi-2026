@@ -2,7 +2,7 @@ export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID as uuidv4 } from "node:crypto";
 
 export async function POST(req) {
   const body = await req.json().catch(() => ({}));
@@ -37,8 +37,8 @@ export async function POST(req) {
   }
 
   const db = getDb();
-  const findByPhone = db.prepare("SELECT id FROM participants WHERE phone = ?");
-  const existing = findByPhone.get(rawPhone);
+  const findByPhone = db.prepare("SELECT id FROM app.participants WHERE phone = ?");
+  const existing = await findByPhone.get(rawPhone);
 
   if (existing) {
     return NextResponse.json({
@@ -53,12 +53,12 @@ export async function POST(req) {
 
   try {
     const insert = db.prepare(`
-      INSERT INTO participants
+      INSERT INTO app.participants
         (registration_id, name, phone, email, year, program, department, payment_proof_url, payment_status)
       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 'pending')
     `);
 
-    const result = insert.run(
+    const result = await insert.run(
       registrationId,
       participantName,
       rawPhone,

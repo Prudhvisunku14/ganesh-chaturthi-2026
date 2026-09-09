@@ -6,7 +6,8 @@ import { requireRole } from "../../../../../lib/auth";
 import { generateSecureToken } from "../../../../../lib/qr";
 
 // body: { action: "verify" | "reject" }
-export async function POST(req, { params }) {
+export async function POST(req, props) {
+  const params = await props.params;
   const session = requireRole(req, ["admin"]);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -16,33 +17,25 @@ export async function POST(req, { params }) {
   }
 
   const db = getDb();
-  const participant = db.prepare("SELECT * FROM participants WHERE id = ?").get(params.id);
+  const participant = await db.prepare("SELECT * FROM app.participants WHERE id = ?").get(params.id);
   if (!participant) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   if (action === "reject") {
-    db.prepare(
-      `UPDATE participants
-       SET payment_status = 'rejected', qr_token = NULL, updated_at = datetime('now')
+    await db.prepare(
+      `UPDATE app.participants
+       SET payment_status = 'rejected', qr_token = NULL, updated_at = to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
        WHERE id = ?`
     ).run(params.id);
     return NextResponse.json({ ok: true, payment_status: "rejected" });
   }
 
-  // action === "verify" — generate a fresh, never-reused secure token.
-  // Never derive it from name/phone/registration_id.
-  let token = participant.qr_token;
-  if (!token) {
-    // Loop guards against the astronomically unlikely case of a collision.
-    do {
-      token = generateSecureToken();
-    } while (db.prepare("SELECT 1 FROM participants WHERE qr_token = ?").get(token));
-  }
-
-  db.prepare(
-    `UPDATE participants
-     SET payment_status = 'verified', qr_token = ?, updated_at = datetime('now')
-     WHERE id = ?`
-  ).run(token, params.id);
-
-  return NextResponse.json({ ok: true, payment_status: "verified", qr_token: token });
+  // Preserve the same QR token even if two admins verify concurrently.
+  const verified = await db.prepare(
+    `UPDATE app.participants
+     SET payment_status = 'verified', qr_token = COALESCE(qr_token, ?),
+         updated_at = to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+     WHERE id = ? RETURNING qr_token`
+  ).get(generateSecureToken(), params.id);
+  if (!verified) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json({ ok: true, payment_status: "verified", qr_token: verified.qr_token });
 }

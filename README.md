@@ -1,36 +1,31 @@
 # Ganesh Chaturthi 2026 — Registration, Payment & Food QR System
 
 A single-event registration, payment verification, one-time food QR, and
-volunteer scanner system, built for ~300 attendees. Next.js 14 (App Router),
-SQLite for local/demo use (Postgres/Supabase-portable schema — see below),
+volunteer scanner system, built for ~300 attendees. Next.js 15 (App Router),
+Supabase PostgreSQL for persistent storage on Vercel Hobby,
 QR generation, WhatsApp click-to-chat (no paid API), and an atomic one-time
 QR claim so the same code can never be used twice, even under concurrent
 scans at the food counter.
 
 ---
 
-## 1. Quick start (local demo, 5 minutes)
+## 1. Setup and deployment
 
-Requires Node.js 18+.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the free Vercel + Supabase setup,
+existing SQLite data migration, environment variables, and event checks.
+
+Requires Node 22.13+. Configure `.env.local`, then run:
 
 ```bash
-npm install
-cp .env.example .env        # generates config; edit SESSION_SECRET for real use
-npm run seed                 # creates demo users + 5 demo participants
+npm ci
+npm run db:setup
+# Optional: npm run db:migrate-sqlite (before seed, for existing local data)
+npm run seed
 npm run dev
 ```
 
-Open http://localhost:3000
-
-**Demo logins** (created by `npm run seed`):
-| Role      | Username    | Password       | Access                          |
-|-----------|-------------|----------------|----------------------------------|
-| Admin     | `admin`     | `admin123`     | Full dashboard                   |
-| Volunteer | `volunteer` | `volunteer123` | Scanner only (`/dashboard/scanner`) |
-
-**Change these passwords before the real event** — either re-run a modified
-`scripts/seed.js`, or add an admin-only "change password" route (not
-included, since only two demo users were in scope here).
+The seed command uses your ADMIN_PASSWORD and VOLUNTEER_PASSWORD; it does
+not add demo participants. SQLite is only read by the migration script.
 
 ---
 
@@ -57,9 +52,8 @@ The one-time-use guarantee is enforced by a single conditional SQL update
 (`UPDATE participants SET food_claimed = 1 ... WHERE qr_token = ? AND
 food_claimed = 0`, in `app/api/scanner/verify/route.js`) — only the first of
 any simultaneous requests can change the row, so two volunteers scanning the
-same QR at the same instant can never both get "valid". This was tested with
-20 concurrent scans of one token in this environment: exactly 1 succeeded,
-19 correctly received "already used" / rate-limited.
+same QR at the same instant can never both get "valid". Local PostgreSQL tests exercise 20 competing claims with exactly one success.
+Repeat the simultaneous two-phone test against the deployed Supabase database.
 
 ---
 
@@ -88,56 +82,28 @@ Duplicate phone numbers are skipped automatically.
 
 ---
 
-## 4. Switching from SQLite to Supabase/Postgres for the real event
+## 4. Database
 
-This app was built against SQLite so it runs with zero external setup, but
-the schema and every query are written to be a near drop-in swap:
-
-1. Run the schema from `lib/db.js` through the Supabase SQL editor, with
-   two syntax changes: `INTEGER PRIMARY KEY AUTOINCREMENT` → `SERIAL PRIMARY
-   KEY`, and `datetime('now')` → `now()`.
-2. Install `@supabase/supabase-js`, and use the **service role key**
-   server-side only (never expose it to the browser — set it as an env var
-   read only inside `app/api/**` route handlers).
-3. Replace each `getDb().prepare(...).run/get/all(...)` call with the
-   Supabase client's `.from(...).select/insert/update(...)` equivalent. The
-   one query that matters most for correctness is the atomic food claim in
-   `app/api/scanner/verify/route.js` — full instructions and the exact
-   Supabase-equivalent query are commented at the bottom of `lib/db.js`.
-
-Budget roughly half a day for this swap and a re-test of the concurrency
-case above before trusting it at the actual event.
-
----
+The app uses Supabase PostgreSQL through its transaction pooler. All SQL
+queries are asynchronous and parameterized. Application data and the invitation
+poster live in the private `app` schema. See `supabase/schema.sql`.
 
 ## 5. Deployment
 
-Any Node.js host that supports SQLite's native binary works (Railway,
-Render, a VPS, Vercel does **not** support `better-sqlite3` on serverless —
-switch to Supabase first if deploying there). Steps:
-
-```bash
-npm install
-npm run build
-npm run seed     # first time only
-npm run start
-```
-
-Set real environment variables (`SESSION_SECRET`, `SHEETS_WEBHOOK_SECRET`, `SMTP_*`, and `APP_BASE_URL` to your
-real domain so QR codes encode `https://yourdomain.com/verify/<token>`
-instead of a bare token).
+Follow [DEPLOYMENT.md](DEPLOYMENT.md). Vercel functions are configured for
+Mumbai. Posters persist in PostgreSQL and are limited to 3 MB.
 
 ---
 
 ## 6. What's deliberately NOT built (scope discipline, per the brief)
 
-- No Kafka/Redis/microservices/Kubernetes — single Next.js app, single DB.
+- No Kafka/Redis/microservices/Kubernetes — single Next.js app, single PostgreSQL database.
 - No paid WhatsApp API — click-to-chat links only; the organizer presses
   Send manually every time. (Direct automated email sending via SMTP is supported).
 - Google Sheets Sync — handled via zero-cost installable Apps Script trigger posting to `/api/participants/webhook`.
 - No password-reset/user-management UI — two seeded logins is enough for a
   single event with a small organizing team; rotate the demo passwords
-  directly in `scripts/seed.js` or via a DB tool before the event.
+  with `ADMIN_PASSWORD`, `VOLUNTEER_PASSWORD`, and `npm run seed` before the event.
 
 ---
 
@@ -162,36 +128,36 @@ app/
 google-apps-script/
   on-form-submit.gs             Google Sheet installable trigger for webhook auto-sync
 lib/
-  db.js         SQLite schema + connection (Postgres swap notes inline)
+  db.js         PostgreSQL connection and parameterized query helpers
   auth.js       JWT session helpers, role guard
   message.js    Shared personalized message generator
   qr.js         secure token generation + QR image rendering (data URL & PNG buffer)
   email.js      Nodemailer SMTP email delivery with attached QR PNG
   whatsapp.js   phone formatting + wa.me click-to-chat links
-scripts/seed.js  demo users + demo participants
+scripts/seed.js  create/rotate admin and volunteer passwords
 middleware.js    route-level redirect for auth/role (UX only — real
                  authorization is enforced again in every API route)
 ```
 
 ---
 
-## 8. Manual test checklist (all verified working in this build)
+## 8. Event verification checklist (repeat on the deployed site)
 
-- [x] Login as admin / volunteer, correct role-based redirect and access
-- [x] Volunteer blocked from admin-only API routes (401)
-- [x] Auto-sync webhook (`POST /api/participants/webhook`): authenticates shared secret, inserts pending row, skips duplicate phone
-- [x] CSV import: valid rows inserted matching real form headers (`Timestamp`, `Email Address`, `Mobile Number`, `Programme`, `Payment Proof`), duplicate phone skipped
-- [x] Verify payment → QR token generated (cryptographically random, not
+- [ ] Login as admin / volunteer, correct role-based redirect and access
+- [ ] Volunteer blocked from admin-only API routes (401)
+- [ ] Auto-sync webhook (`POST /api/participants/webhook`): authenticates shared secret, inserts pending row, skips duplicate phone
+- [ ] CSV import: valid rows inserted matching real form headers (`Timestamp`, `Email Address`, `Mobile Number`, `Programme`, `Payment Proof`), duplicate phone skipped
+- [ ] Verify payment → QR token generated (cryptographically random, not
       derived from name/phone/ID)
-- [x] Reject payment → no usable QR
-- [x] WhatsApp link: correct `wa.me` phone formatting, correct personalized
+- [ ] Reject payment → no usable QR
+- [ ] WhatsApp link: correct `wa.me` phone formatting, correct personalized
       message, correctly URL-encoded
-- [x] Email delivery (`POST /api/participants/[id]/email`): sends email via SMTP with attached QR PNG buffer and shared personalized text message, updates `email_sent` timestamp
-- [x] First scan of a valid QR → `valid`, food marked claimed
-- [x] Second scan of the same QR → `already_used`
-- [x] Unrecognized token → `invalid_unrecognized`
-- [x] 20 concurrent scans of one fresh token → exactly 1 `valid`, rest
+- [ ] Email delivery (`POST /api/participants/[id]/email`): sends email via SMTP with attached QR PNG buffer and shared personalized text message, updates `email_sent` timestamp
+- [ ] First scan of a valid QR → `valid`, food marked claimed
+- [ ] Second scan of the same QR → `already_used`
+- [ ] Unrecognized token → `invalid_unrecognized`
+- [ ] 20 concurrent scans of one fresh token → exactly 1 `valid`, rest
       `already_used`/rate-limited
-- [x] CSV export includes all required columns including `email` and `email_status`
-- [x] Dashboard stats and food-collection progress update after scans
+- [ ] CSV export includes all required columns including `email` and `email_status`
+- [ ] Dashboard stats and food-collection progress update after scans
 

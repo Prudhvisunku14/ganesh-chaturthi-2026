@@ -4,17 +4,19 @@ import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db";
 import { requireRole } from "../../../../lib/auth";
 
-export async function GET(req, { params }) {
+export async function GET(req, props) {
+  const params = await props.params;
   const session = requireRole(req, ["admin", "volunteer"]);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const db = getDb();
-  const row = db.prepare("SELECT * FROM participants WHERE id = ?").get(params.id);
+  const row = await db.prepare("SELECT * FROM app.participants WHERE id = ?").get(params.id);
   if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ participant: row });
 }
 
-export async function PATCH(req, { params }) {
+export async function PATCH(req, props) {
+  const params = await props.params;
   const session = requireRole(req, ["admin"]);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -35,18 +37,19 @@ export async function PATCH(req, { params }) {
   }
 
   const db = getDb();
-  db.prepare(
-    `UPDATE participants SET ${updates.join(", ")}, updated_at = datetime('now') WHERE id = @id`
+  await db.prepare(
+    `UPDATE app.participants SET ${updates.join(", ")}, updated_at = to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') WHERE id = @id`
   ).run(args);
 
   return NextResponse.json({ ok: true });
 }
 
-export async function DELETE(req, { params }) {
+export async function DELETE(req, props) {
+  const params = await props.params;
   const session = requireRole(req, ["admin"]);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const db = getDb();
-  db.prepare("DELETE FROM participants WHERE id = ?").run(params.id);
+  await db.prepare("DELETE FROM app.participants WHERE id = ?").run(params.id);
   return NextResponse.json({ ok: true });
 }

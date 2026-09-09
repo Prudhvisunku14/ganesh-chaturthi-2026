@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import Papa from "papaparse";
 import { getDb } from "../../../../lib/db";
 import { requireRole } from "../../../../lib/auth";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID as uuidv4 } from "node:crypto";
 
 // Accepts a CSV with headers matching (case-insensitively) the Google Form
 // export: name, phone, year, program, department, payment_proof_url
@@ -27,18 +27,18 @@ export async function POST(req) {
   const normalizeKey = (k) => k.trim().toLowerCase().replace(/\s+/g, "_");
 
   const db = getDb();
-  const insert = db.prepare(`
-    INSERT INTO participants (registration_id, name, phone, email, year, program, department, payment_proof_url, payment_status)
-    VALUES (@registration_id, @name, @phone, @email, @year, @program, @department, @payment_proof_url, 'pending')
-  `);
-  const findByPhone = db.prepare("SELECT id FROM participants WHERE phone = ?");
 
   let imported = 0;
   let skippedDuplicates = 0;
   let skippedInvalid = 0;
   const errors = [];
 
-  const runImport = db.transaction((rows) => {
+  const runImport = db.transaction(async (db, rows) => {
+    const insert = db.prepare(`
+      INSERT INTO app.participants (registration_id, name, phone, email, year, program, department, payment_proof_url, payment_status)
+      VALUES (@registration_id, @name, @phone, @email, @year, @program, @department, @payment_proof_url, 'pending')
+    `);
+    const findByPhone = db.prepare("SELECT id FROM app.participants WHERE phone = ?");
     for (const raw of rows) {
       const row = {};
       for (const key in raw) row[normalizeKey(key)] = raw[key];
@@ -55,12 +55,12 @@ export async function POST(req) {
         continue;
       }
 
-      if (findByPhone.get(phone)) {
+      if (await findByPhone.get(phone)) {
         skippedDuplicates += 1;
         continue;
       }
 
-      insert.run({
+      await insert.run({
         registration_id: `REG-${uuidv4().slice(0, 8).toUpperCase()}`,
         name,
         phone,
@@ -75,7 +75,7 @@ export async function POST(req) {
   });
 
   try {
-    runImport(parsed.data);
+    await runImport(parsed.data);
   } catch (err) {
     return NextResponse.json({ error: "Import failed: " + err.message }, { status: 500 });
   }

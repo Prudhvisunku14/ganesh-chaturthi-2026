@@ -12,10 +12,10 @@ export async function GET(req) {
   const sort = searchParams.get("sort") === "oldest" ? "ASC" : "DESC";
 
   const db = getDb();
-  const rows = db
+  const rows = await db
     .prepare(
       `SELECT name, program, year, department, claimed_at
-       FROM participants
+       FROM app.participants
        WHERE food_claimed = 1
        ORDER BY claimed_at ${sort}`
     )
