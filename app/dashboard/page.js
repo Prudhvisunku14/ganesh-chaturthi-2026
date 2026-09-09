@@ -157,6 +157,11 @@ export default function DashboardHome() {
 function InvitationSettingsCard() {
   const [settings, setSettings] = useState(null);
   const [message, setMessage] = useState("");
+  const [verifiedParticipants, setVerifiedParticipants] = useState([]);
+  const [previewId, setPreviewId] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [sending, setSending] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
 
@@ -169,7 +174,25 @@ function InvitationSettingsCard() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    fetch("/api/participants?payment=verified")
+      .then((res) => res.ok ? res.json() : { participants: [] })
+      .then((data) => setVerifiedParticipants(data.participants || []));
+  }, [load]);
+
+  async function loadPreview(id = previewId) {
+    if (!id) {
+      setPreview(null);
+      return;
+    }
+    setPreviewLoading(true);
+    const res = await fetch(`/api/participants/${id}/whatsapp`);
+    const data = await res.json().catch(() => ({}));
+    setPreviewLoading(false);
+    if (res.ok) setPreview({ ...data, id });
+    else setNotice(data.error || "Could not load invitation preview.");
+  }
 
   async function saveTemplate() {
     setSaving(true);
@@ -207,6 +230,17 @@ function InvitationSettingsCard() {
     if (res.ok) { setNotice("Poster removed."); load(); }
   }
 
+  async function sendPreviewInvitation() {
+    if (!preview?.id) return;
+    setSending(true);
+    const res = await fetch(`/api/participants/${preview.id}/whatsapp`, { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    setSending(false);
+    setNotice(res.ok
+      ? `Invitation sent to ${verifiedParticipants.find((item) => String(item.id) === String(preview.id))?.name || "participant"}.`
+      : (data.error || "Invitation failed."));
+  }
+
   if (!settings) return null;
   return (
     <section className="card" style={{ padding: 18, marginBottom: 20 }}>
@@ -223,7 +257,7 @@ function InvitationSettingsCard() {
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 14 }}>
         <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={saveTemplate}>{saving ? "Saving..." : "Save Template"}</button>
         <label className="btn btn-sm" style={{ cursor: "pointer" }}>
-          Change Poster
+          Save Poster
           <input type="file" accept="image/*" onChange={uploadPoster} style={{ display: "none" }} />
         </label>
         {settings.poster_url && <button type="button" className="btn btn-sm" onClick={removePoster}>Remove Poster</button>}
@@ -237,6 +271,39 @@ function InvitationSettingsCard() {
           <img src={`${settings.poster_url}?v=${settings.updated_at}`} alt="Current invitation poster" style={{ maxWidth: "100%", maxHeight: 260, objectFit: "contain", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }} />
         </div>
       )}
+
+      <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", marginBottom: 6 }}>INVITATION PREVIEW</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <select value={previewId} onChange={(event) => { setPreviewId(event.target.value); setPreview(null); }} style={{ flex: "1 1 220px" }}>
+            <option value="">Select a verified participant</option>
+            {verifiedParticipants.map((participant) => (
+              <option key={participant.id} value={participant.id}>{participant.name} · {participant.phone}</option>
+            ))}
+          </select>
+          <button type="button" className="btn btn-sm" disabled={!previewId || previewLoading} onClick={() => loadPreview()}>
+            {previewLoading ? "Loading..." : "Preview Invitation"}
+          </button>
+        </div>
+        {preview && (
+          <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 160px", gap: 14, alignItems: "start" }}>
+            <div>
+              {preview.poster_url && <img src={`${preview.poster_url}?v=${settings.updated_at}`} alt="Selected invitation poster preview" style={{ width: "100%", maxHeight: 180, objectFit: "contain", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", marginBottom: 10 }} />}
+              <pre style={{ whiteSpace: "pre-wrap", background: "var(--surface-muted)", borderRadius: "var(--radius-sm)", padding: 12, fontFamily: "inherit", fontSize: 12.5, lineHeight: 1.5, margin: 0 }}>{preview.message}</pre>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
+                <button type="button" className="btn btn-primary btn-sm" disabled={sending || preview.mode !== "cloud"} onClick={sendPreviewInvitation}>
+                  {sending ? "Sending..." : preview.mode === "cloud" ? "Send Invitation" : "Open WhatsApp manually"}
+                </button>
+                {preview.mode === "fallback" && <span style={{ fontSize: 11.5, color: "var(--text-muted)" }}>wa.me cannot attach the poster or QR automatically; status stays NOT SENT.</span>}
+              </div>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <img src={preview.qr_image} alt="Selected participant unique food QR" style={{ width: 150, height: 150, padding: 8, background: "#fff", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)" }} />
+              <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 5 }}>QR for selected participant</div>
+            </div>
+          </div>
+        )}
+      </div>
     </section>
   );
 }
