@@ -86,11 +86,6 @@ export default function ParticipantsPage() {
     return () => clearTimeout(t);
   }, [load]);
 
-  useEffect(() => {
-    const interval = setInterval(load, 5000);
-    return () => clearInterval(interval);
-  }, [load]);
-
   function showToast(msg) {
     setToast(msg);
     setTimeout(() => setToast(""), 3500);
