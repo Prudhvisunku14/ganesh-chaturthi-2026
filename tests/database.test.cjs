@@ -7,6 +7,7 @@ const { PGlite } = require('@electric-sql/pglite');
 const { createDb, bind } = require('../lib/db');
 const { CLAIM_SQL } = require('../lib/claim');
 const { NextRequest } = require('next/server');
+const XLSX = require('xlsx');
 const auth = require('../lib/auth');
 process.env.SESSION_SECRET = 'test-only-secret-'.repeat(4);
 process.env.SHEETS_WEBHOOK_SECRET = 'test-webhook';
@@ -46,6 +47,16 @@ function request(route, method, body, role = 'admin') {
   if (role) headers.cookie = `${auth.COOKIE_NAME}=${auth.createSessionToken({ id: 1, username: role, role })}`;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   return new NextRequest(`https://example.test/api/${route}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+}
+
+function fileRequest(route, fileName, bytes, role = 'admin') {
+  const formData = new FormData();
+  formData.append('file', new Blob([bytes]), fileName);
+  return new NextRequest(`https://example.test/api/${route}`, {
+    method: 'POST',
+    headers: { cookie: `${auth.COOKIE_NAME}=${auth.createSessionToken({ id: 1, username: role, role })}` },
+    body: formData,
+  });
 }
 
 test('SQL values stay parameterized, including repeated names and quoted markers', () => {
@@ -104,12 +115,23 @@ test('PostgreSQL schema and application workflows', async t => {
       const missing = await (await scanner.POST(request('scanner/verify', 'POST', { token: 'missing' }, 'volunteer'))).json();
       assert.equal(missing.result, 'invalid_unrecognized');
     });
-    await t.test('CSV import, duplicates, webhook, stats, history and export', async () => {
+    await t.test('CSV/XLSX import, duplicates, webhook, stats, history and export', async () => {
       const importer = loadRoute('participants/import', db);
       const result = await (await importer.POST(request('participants/import', 'POST', { csv: 'Name,Mobile Number,Programme\nCSV Attendee,9000000002,BSc\nDuplicate,9000000002,BSc\nInvalid,,BSc' }))).json();
-      assert.equal(result.imported, 1);
-      assert.equal(result.skipped_duplicates, 1);
+      assert.equal(result.imported, 2);
+      assert.equal(result.skipped_duplicates, 0);
       assert.equal(result.skipped_invalid, 1);
+
+      const workbook = XLSX.utils.book_new();
+      const sheet = XLSX.utils.json_to_sheet([
+        { Name: 'First XLSX', 'Mobile Number': '9000000004', Programme: 'BTech' },
+        { Name: 'Second XLSX', 'Mobile Number': '9000000004', Programme: 'BTech' },
+      ]);
+      XLSX.utils.book_append_sheet(workbook, sheet, 'Participants');
+      const xlsxBytes = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+      const xlsxResult = await (await importer.POST(fileRequest('participants/import', 'participants.xlsx', xlsxBytes))).json();
+      assert.equal(xlsxResult.imported, 2);
+      assert.equal(xlsxResult.skipped_duplicates, 0);
       const webhook = loadRoute('participants/webhook', db);
       assert.equal((await webhook.POST(request('participants/webhook', 'POST', {}, null))).status, 401);
       const response = await (await webhook.POST(request('participants/webhook', 'POST', { secret: 'test-webhook', name: 'Webhook', phone: '9000000003' }, null))).json();

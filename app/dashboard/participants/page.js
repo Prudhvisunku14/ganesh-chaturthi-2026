@@ -22,6 +22,8 @@ export default function ParticipantsPage() {
   const [toast,        setToast]        = useState("");
   const [selectedIds,  setSelectedIds]  = useState([]);
   const [bulkSending,  setBulkSending]  = useState(false);
+  const [importFile,   setImportFile]   = useState(null);
+  const [importing,    setImporting]    = useState(false);
   const fileInputRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -190,24 +192,30 @@ export default function ParticipantsPage() {
     }
   }
 
-  async function handleImportFile(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const text = await file.text();
+  function handleImportFile(e) {
+    setImportFile(e.target.files?.[0] || null);
+  }
+
+  async function handleImport() {
+    if (!importFile || importing) return;
+    setImporting(true);
+    const formData = new FormData();
+    formData.append("file", importFile);
     const res  = await fetch("/api/participants/import", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ csv: text }),
+      body: formData,
     });
     const data = await res.json().catch(() => ({}));
     if (res.ok) {
-      showToast(`Imported ${data.imported}. Skipped ${data.skipped_duplicates} duplicates.`);
+      showToast(`Imported ${data.imported} entries. ${data.skipped_invalid} invalid rows skipped.`);
       setImportOpen(false);
       load();
     } else {
       showToast(data.error || "Import failed.");
     }
-    e.target.value = "";
+    setImporting(false);
+    setImportFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   return (
@@ -324,11 +332,16 @@ export default function ParticipantsPage() {
         />
       )}
       {importOpen && (
-        <Modal onClose={() => setImportOpen(false)} title="Import Participants CSV">
+        <Modal onClose={() => { setImportOpen(false); setImportFile(null); }} title="Import Participants File">
           <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 14, lineHeight: 1.4 }}>
-            Upload CSV with headers: <code>Name, Mobile Number, Email, Programme, Year</code>.
+             Upload a CSV or XLSX file with headers: <code>Name, Mobile Number, Email, Programme, Year</code>.
           </p>
-          <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImportFile} />
+           <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" onChange={handleImportFile} />
+           {importFile && (
+             <button type="button" className="btn btn-primary btn-block" onClick={handleImport} disabled={importing} style={{ marginTop: 14 }}>
+               {importing ? "Importing..." : `Import ${importFile.name}`}
+             </button>
+           )}
         </Modal>
       )}
 

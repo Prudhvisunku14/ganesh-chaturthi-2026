@@ -60,7 +60,7 @@ export async function GET(req) {
               email_sent, email_sent_at, food_claimed, claimed_at, created_at
        FROM app.participants
        ${whereClause}
-       ORDER BY created_at DESC`
+      ORDER BY id ASC`
     )
     .all(args);
 
