@@ -27,7 +27,9 @@ export default function ParticipantsPage() {
   const [initialLoad,  setInitialLoad]  = useState(true);
   const [yearOptions,  setYearOptions]  = useState([]);
   const [verifyProgress, setVerifyProgress] = useState(null);
+  const [emailBulkProgress, setEmailBulkProgress] = useState(null);
   const fileInputRef = useRef(null);
+  const emailStopRef = useRef(false);
 
   const load = useCallback(async () => {
     if (initialLoad) setLoading(true);
@@ -158,6 +160,53 @@ export default function ParticipantsPage() {
     await load();
     setVerifyProgress(null);
     showToast(`Verified ${succeeded} of ${pending.length}. Failed: ${failed}.`);
+  }
+
+  async function handleSendEmailAll() {
+    const eligible = participants.filter((participant) => (
+      participant.payment_status === "verified" && !participant.email_sent && participant.email
+    ));
+    if (!eligible.length) return;
+    if (!window.confirm(`Send email to ${eligible.length} participants?`)) return;
+
+    let sent = 0;
+    let failed = 0;
+    const failedParticipants = [];
+    emailStopRef.current = false;
+    setEmailBulkProgress({ current: 0, total: eligible.length });
+
+    for (let index = 0; index < eligible.length; index += 1) {
+      if (emailStopRef.current) break;
+      const participant = eligible[index];
+      try {
+        const res = await fetch(`/api/participants/${participant.id}/email`, { method: "POST" });
+        if (res.ok) {
+          sent += 1;
+        } else {
+          failed += 1;
+          failedParticipants.push({ id: participant.id, name: participant.name });
+        }
+      } catch (error) {
+        failed += 1;
+        failedParticipants.push({ id: participant.id, name: participant.name, error: error.message });
+      }
+      setEmailBulkProgress({ current: index + 1, total: eligible.length });
+      if (index < eligible.length - 1 && !emailStopRef.current) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+    }
+
+    const stopped = emailStopRef.current;
+    await load();
+    setEmailBulkProgress(null);
+    if (failedParticipants.length) console.warn("Failed participant emails:", failedParticipants);
+    showToast(
+      `Sent ${sent} of ${eligible.length}. ${failed} failed${stopped ? " — stopped." : " — see console for details."}`
+    );
+  }
+
+  function handleStopEmailBulk() {
+    emailStopRef.current = true;
   }
 
   async function handleOpenQrWhatsApp(p) {
@@ -293,6 +342,24 @@ export default function ParticipantsPage() {
         <button type="button" className="btn btn-sm btn-success" disabled={!!verifyProgress} onClick={handleVerifyAll} style={{ marginTop: 10, marginLeft: 6 }}>
           {verifyProgress ? `Verifying ${verifyProgress.current}/${verifyProgress.total}...` : "Verify All"}
         </button>
+        <button
+          type="button"
+          className="btn btn-sm btn-primary"
+          disabled={!!verifyProgress || !!emailBulkProgress || !participants.some((participant) => participant.payment_status === "verified" && !participant.email_sent && participant.email)}
+          onClick={handleSendEmailAll}
+          style={{ marginTop: 10, marginLeft: 6 }}
+        >
+          {emailBulkProgress
+            ? `Sending ${emailBulkProgress.current}/${emailBulkProgress.total}...`
+            : participants.some((participant) => participant.payment_status === "verified" && !participant.email_sent && participant.email)
+              ? "Send Email to All Pending"
+              : "All emails sent"}
+        </button>
+        {emailBulkProgress && (
+          <button type="button" className="btn btn-sm" onClick={handleStopEmailBulk} style={{ marginTop: 10, marginLeft: 6 }}>
+            Stop
+          </button>
+        )}
 
         {/* Secondary Toolbar Buttons */}
         <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
