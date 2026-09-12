@@ -35,8 +35,6 @@ export default function FoodHistoryPage() {
 
   useEffect(() => {
     load();
-    const interval = setInterval(load, 5000);
-    return () => clearInterval(interval);
   }, [load]);
 
   return (

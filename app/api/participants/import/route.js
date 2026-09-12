@@ -2,7 +2,7 @@ export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import Papa from "papaparse";
-import * as XLSX from "xlsx";
+import { read as readXlsx, utils as xlsxUtils } from "xlsx";
 import { getDb } from "../../../../lib/db";
 import { requireRole } from "../../../../lib/auth";
 import { randomUUID as uuidv4 } from "node:crypto";
@@ -25,10 +25,10 @@ export async function POST(req) {
       const buffer = Buffer.from(await file.arrayBuffer());
       const fileName = String(file.name || "").toLowerCase();
       if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
-        const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false });
+        const workbook = readXlsx(buffer, { type: "buffer", cellDates: false });
         const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
         if (!firstSheet) return NextResponse.json({ error: "The workbook has no sheets." }, { status: 400 });
-        rows = XLSX.utils.sheet_to_json(firstSheet, { defval: "", raw: false });
+        rows = xlsxUtils.sheet_to_json(firstSheet, { defval: "", raw: false });
       } else {
         rows = parseCsv(buffer.toString("utf8"));
       }
