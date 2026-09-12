@@ -25,6 +25,8 @@ export default function ParticipantsPage() {
   const [importFile,   setImportFile]   = useState(null);
   const [importing,    setImporting]    = useState(false);
   const [initialLoad,  setInitialLoad]  = useState(true);
+  const [yearOptions,  setYearOptions]  = useState([]);
+  const [verifyProgress, setVerifyProgress] = useState(null);
   const fileInputRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -90,6 +92,18 @@ export default function ParticipantsPage() {
     return () => clearTimeout(t);
   }, [load]);
 
+  useEffect(() => {
+    fetch("/api/participants")
+      .then((res) => res.ok ? res.json() : { participants: [] })
+      .then((data) => {
+        const years = [...new Set(
+          (data.participants || []).map((participant) => String(participant.year || "").trim()).filter(Boolean)
+        )].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+        setYearOptions(years);
+      })
+      .catch(() => setYearOptions([]));
+  }, []);
+
   function showToast(msg) {
     setToast(msg);
     setTimeout(() => setToast(""), 3500);
@@ -113,6 +127,37 @@ export default function ParticipantsPage() {
       const d = await res.json().catch(() => ({}));
       showToast(d.error || "Action failed.");
     }
+  }
+
+  async function handleVerifyAll() {
+    const pending = participants.filter((participant) => participant.payment_status === "pending");
+    if (!pending.length) {
+      showToast("No pending participants in the current list.");
+      return;
+    }
+    if (!window.confirm(`Verify ${pending.length} pending participants?`)) return;
+
+    let succeeded = 0;
+    let failed = 0;
+    setVerifyProgress({ current: 0, total: pending.length });
+    for (const participant of pending) {
+      try {
+        const res = await fetch(`/api/participants/${participant.id}/verify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "verify" }),
+        });
+        if (res.ok) succeeded += 1;
+        else failed += 1;
+      } catch {
+        failed += 1;
+      }
+      setVerifyProgress({ current: succeeded + failed, total: pending.length });
+    }
+
+    await load();
+    setVerifyProgress(null);
+    showToast(`Verified ${succeeded} of ${pending.length}. Failed: ${failed}.`);
   }
 
   async function handleOpenQrWhatsApp(p) {
@@ -245,6 +290,9 @@ export default function ParticipantsPage() {
         <button type="button" className="btn btn-sm btn-primary" disabled={!selectedIds.length || bulkSending} onClick={handleBulkSend} style={{ marginTop: 10 }}>
           {bulkSending ? "Sending..." : `📱 Send to Selected (${selectedIds.length})`}
         </button>
+        <button type="button" className="btn btn-sm btn-success" disabled={!!verifyProgress} onClick={handleVerifyAll} style={{ marginTop: 10, marginLeft: 6 }}>
+          {verifyProgress ? `Verifying ${verifyProgress.current}/${verifyProgress.total}...` : "Verify All"}
+        </button>
 
         {/* Secondary Toolbar Buttons */}
         <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
@@ -264,7 +312,7 @@ export default function ParticipantsPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6 }}>
           <select value={filters.payment} onChange={(e) => setFilters((f) => ({ ...f, payment: e.target.value }))}>
             <option value="">Status: All</option>
             <option value="pending">Pending</option>
@@ -276,6 +324,21 @@ export default function ParticipantsPage() {
             <option value="collected">Collected</option>
             <option value="not_collected">Pending</option>
           </select>
+          <select value={filters.year} onChange={(e) => setFilters((f) => ({ ...f, year: e.target.value }))}>
+            <option value="">Year: All</option>
+            {yearOptions.map((year) => <option key={year} value={year}>{year}</option>)}
+          </select>
+        </div>
+        <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+          {["1st Year", "2nd Year", "3rd Year", "4th Year"].map((shortcut) => {
+            const matchingYear = yearOptions.find((year) => year === shortcut);
+            if (!matchingYear) return null;
+            return (
+              <button key={shortcut} type="button" className="btn btn-sm" onClick={() => setFilters((f) => ({ ...f, year: matchingYear }))}>
+                {shortcut}
+              </button>
+            );
+          })}
         </div>
       </div>
 
