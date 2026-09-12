@@ -28,8 +28,10 @@ export default function ParticipantsPage() {
   const [yearOptions,  setYearOptions]  = useState([]);
   const [verifyProgress, setVerifyProgress] = useState(null);
   const [emailBulkProgress, setEmailBulkProgress] = useState(null);
+  const [emailBatchSummary, setEmailBatchSummary] = useState(null);
   const fileInputRef = useRef(null);
   const emailStopRef = useRef(false);
+  const emailProgressRef = useRef({ completed: 0, total: 0 });
 
   const load = useCallback(async () => {
     if (initialLoad) setLoading(true);
@@ -163,21 +165,30 @@ export default function ParticipantsPage() {
   }
 
   async function handleSendEmailAll() {
+    const BATCH_SIZE = 30;
     const eligible = participants.filter((participant) => (
       participant.payment_status === "verified" && !participant.email_sent && participant.email
     ));
     if (!eligible.length) return;
-    if (!window.confirm(`Send email to ${eligible.length} participants?`)) return;
+    const targetBatch = eligible.slice(0, BATCH_SIZE);
+    if (!window.confirm(`Send emails to the next batch of ${targetBatch.length} verified participant(s)? (${eligible.length} total pending remaining)`)) return;
+
+    if (!emailProgressRef.current.total || emailProgressRef.current.completed >= emailProgressRef.current.total) {
+      emailProgressRef.current = { completed: 0, total: eligible.length };
+    }
+    const overallTotal = emailProgressRef.current.total;
+    const startingCompleted = emailProgressRef.current.completed;
+    setEmailBatchSummary(null);
 
     let sent = 0;
     let failed = 0;
     const failedParticipants = [];
     emailStopRef.current = false;
-    setEmailBulkProgress({ current: 0, total: eligible.length });
+    setEmailBulkProgress({ current: startingCompleted, total: overallTotal, batchTotal: targetBatch.length });
 
-    for (let index = 0; index < eligible.length; index += 1) {
+    for (let index = 0; index < targetBatch.length; index += 1) {
       if (emailStopRef.current) break;
-      const participant = eligible[index];
+      const participant = targetBatch[index];
       try {
         const res = await fetch(`/api/participants/${participant.id}/email`, { method: "POST" });
         if (res.ok) {
@@ -190,18 +201,24 @@ export default function ParticipantsPage() {
         failed += 1;
         failedParticipants.push({ id: participant.id, name: participant.name, error: error.message });
       }
-      setEmailBulkProgress({ current: index + 1, total: eligible.length });
-      if (index < eligible.length - 1 && !emailStopRef.current) {
-        await new Promise((resolve) => setTimeout(resolve, 400));
+      setEmailBulkProgress({ current: startingCompleted + index + 1, total: overallTotal, batchTotal: targetBatch.length });
+      if (index < targetBatch.length - 1 && !emailStopRef.current) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
       }
     }
 
     const stopped = emailStopRef.current;
+    emailProgressRef.current.completed = startingCompleted + sent + failed;
+    setEmailBatchSummary({ completed: emailProgressRef.current.completed, total: overallTotal });
     await load();
     setEmailBulkProgress(null);
     if (failedParticipants.length) console.warn("Failed participant emails:", failedParticipants);
+    const processed = sent + failed;
+    const remaining = Math.max(overallTotal - emailProgressRef.current.completed, 0);
     showToast(
-      `Sent ${sent} of ${eligible.length}. ${failed} failed${stopped ? " — stopped." : " — see console for details."}`
+      stopped
+        ? `Stopped batch. Sent ${sent} of ${processed}. ${failed} failed.`
+        : `Batch complete! Sent ${sent} of ${targetBatch.length}. ${remaining > 0 ? `${remaining} left for next batch.` : ""}`
     );
   }
 
@@ -352,7 +369,7 @@ export default function ParticipantsPage() {
           {emailBulkProgress
             ? `Sending ${emailBulkProgress.current}/${emailBulkProgress.total}...`
             : participants.some((participant) => participant.payment_status === "verified" && !participant.email_sent && participant.email)
-              ? "Send Email to All Pending"
+              ? `Send Next Batch of 30 (${emailBatchSummary ? `${emailBatchSummary.completed}/${emailBatchSummary.total}, ` : ""}${participants.filter((participant) => participant.payment_status === "verified" && !participant.email_sent && participant.email).length} pending)`
               : "All emails sent"}
         </button>
         {emailBulkProgress && (
