@@ -24,10 +24,11 @@ export default function ParticipantsPage() {
   const [bulkSending,  setBulkSending]  = useState(false);
   const [importFile,   setImportFile]   = useState(null);
   const [importing,    setImporting]    = useState(false);
+  const [initialLoad,  setInitialLoad]  = useState(true);
   const fileInputRef = useRef(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (initialLoad) setLoading(true);
     const params = new URLSearchParams();
     if (search) params.set("search", search);
     Object.entries(filters).forEach(([k, v]) => v && params.set(k, v));
@@ -40,7 +41,8 @@ export default function ParticipantsPage() {
     const data = await res.json().catch(() => ({}));
     setParticipants(data.participants || []);
     setLoading(false);
-  }, [search, filters]);
+    setInitialLoad(false);
+  }, [search, filters, initialLoad]);
 
   async function handleExport() {
     try {
